@@ -47,108 +47,37 @@ variables:
     {%- set ns = namespace(devices=[]) %}
     {%- for device_id in device_ids %}
       {%- set device=get_device_topic(device_id)|replace(' ','') %}
-      {% if device != 'unavailable' and device != '' %}
-        {% set ns.devices = ns.devices + [ device ~ '/custom/timer'] %}
-      {% endif %}
+      {% set ns.devices = ns.devices + [ device ~ '/custom/timer'] %}
     {%- endfor %}
-    {{ ns.devices }}
+    {{ ns.devices | reject('match','unavailable') | list}}
+
+  payload: >-
+    {% set duration = as_timedelta(state_attr(timer_entity, 'duration')).total_seconds() %}
+    {% set remaining = as_datetime(state_attr(timer_entity, 'finishes_at')) - now().replace(microsecond=0) %}
+    {% set passed = duration - remaining.total_seconds() %}
+    {% set progress = ((passed/duration) * 100) | round(0) | int %}
+    {{
+      dict(
+        icon = '42893',
+        text = remaining | string,
+        progress = progress,
+        progressC = progress_color,
+        progressBC = progress_background_color
+      )
+    }}
 
 trigger:
-  - platform: state
-    entity_id: !input timer_entity
-    to: active
-    id: start
-  - platform: state
-    entity_id: !input timer_entity
-    to: idle
-    id: stop
+  - platform: time_pattern
+    minutes: /1
 
 condition: []
 action:
-  - choose:
-      - conditions:
-          - condition: trigger
-            id: start
-        sequence:
-          - parallel:
-              - repeat:
-                  sequence:
-                    - service: mqtt.publish
-                      data:
-                        qos: 0
-                        retain: false
-                        topic: "{{ repeat.item }}"
-                        payload: >
-                          {% set duration = as_timedelta(state_attr(timer_entity, 'duration')).total_seconds() %}
-                          {% set remaining = as_datetime(state_attr(timer_entity, 'finishes_at')) - now().replace(microsecond=0) %}
-                          {% set passed = duration - remaining.total_seconds() %}
-                          {% set progress = ((passed/duration) * 100) | round(0) | int %}
-                          {{
-                            dict(
-                              icon = '42893',
-                              text = remaining | string,
-                              progress = progress,
-                              progressC = progress_color,
-                              progressBC = progress_background_color
-                            )
-                          }}
-                    - delay:
-                        seconds: 1
-                  while:
-                    - condition: state
-                      entity_id: !input timer_entity
-                      state: active
-              - service: mqtt.publish
-                data:
-                  qos: 0
-                  retain: false
-                  topic: "{{ repeat.item | replace('/timer', '/settings') }}"
-                  payload: "{\"ATRANS\": false}"
-              - repeat:
-                  count: 1
-                  sequence:
-                    - service: mqtt.publish
-                      data:
-                        qos: 0
-                        retain: false
-                        topic: "{{ repeat.item | replace('/timer', '/switch') }}"
-                        payload: "{\"name\":\"timer\"}"
-      - conditions:
-          - condition: trigger
-            id: stop
-        sequence:
-          - repeat:
-              for_each: "{{ devices_topics }}"
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item | replace('/timer', '/sound') }}"
-                    payload: "{\"sound\":\"short\"}"
-          - delay:
-              seconds: 1
-          - parallel:
-              - repeat:
-                  for_each: "{{ devices_topics }}"
-                  sequence:
-                    - service: mqtt.publish
-                      data:
-                        qos: 0
-                        retain: false
-                        topic: "{{ repeat.item }}"
-                      condition:
-                        - condition: template
-                          value_template: "{{ repeat.item != '' }}"
-              - repeat:
-                  for_each: "{{ devices_topics }}"
-                  sequence:
-                    - service: mqtt.publish
-                      data:
-                        qos: 0
-                        retain: false
-                        topic: "{{ repeat.item | replace('/timer', '/settings') }}"
-                        payload: "{\"ATRANS\": true}"
-                      condition:
-                        - condition: template
-                          value_template: "{{ repeat.item != '' }}"
+  - repeat:
+      for_each: "{{ devices_topics }}"
+      sequence:
+        - service: mqtt.publish
+          data:
+            qos: 0
+            retain: false
+            topic: "{{ repeat.item }}"
+            payload: "{{ payload }}"
