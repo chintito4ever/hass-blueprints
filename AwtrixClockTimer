@@ -47,9 +47,11 @@ variables:
     {%- set ns = namespace(devices=[]) %}
     {%- for device_id in device_ids %}
       {%- set device=get_device_topic(device_id)|replace(' ','') %}
-      {% set ns.devices = ns.devices + [ device ~ '/custom/timer'] %}
+      {% if device != 'unavailable' %}
+        {% set ns.devices = ns.devices + [ device ~ '/custom/timer'] %}
+      {% endif %}
     {%- endfor %}
-    {{ ns.devices | reject('match','unavailable') | list}}
+    {{ ns.devices }}
 
 trigger:
   - platform: state
@@ -115,23 +117,32 @@ action:
           - condition: trigger
             id: stop
         sequence:
-          - service: mqtt.publish
-            data:
-              qos: 0
-              retain: false
-              topic: "{{ repeat.item | replace('/timer', '/sound') }}"
-              payload: "{\"sound\":\"short\"}"
+          - repeat:
+              for_each: "{{ devices_topics }}"
+              sequence:
+                - service: mqtt.publish
+                  data:
+                    qos: 0
+                    retain: false
+                    topic: "{{ repeat.item | replace('/timer', '/sound') }}"
+                    payload: "{\"sound\":\"short\"}"
           - delay:
               seconds: 1
           - parallel:
-              - service: mqtt.publish
-                data:
-                  qos: 0
-                  retain: false
-                  topic: "{{ repeat.item }}"
-              - service: mqtt.publish
-                data:
-                  qos: 0
-                  retain: false
-                  topic: "{{ repeat.item | replace('/timer', '/settings') }}"
-                  payload: "{\"ATRANS\": true}"
+              - repeat:
+                  for_each: "{{ devices_topics }}"
+                  sequence:
+                    - service: mqtt.publish
+                      data:
+                        qos: 0
+                        retain: false
+                        topic: "{{ repeat.item }}"
+              - repeat:
+                  for_each: "{{ devices_topics }}"
+                  sequence:
+                    - service: mqtt.publish
+                      data:
+                        qos: 0
+                        retain: false
+                        topic: "{{ repeat.item | replace('/timer', '/settings') }}"
+                        payload: "{\"ATRANS\": true}"
