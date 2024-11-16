@@ -47,7 +47,7 @@ variables:
     {%- set ns = namespace(devices=[]) %}
     {%- for device_id in device_ids %}
       {%- set device=get_device_topic(device_id)|replace(' ','') %}
-      {% if device != 'unavailable' %}
+      {% if device != 'unavailable' and device != '' %}
         {% set ns.devices = ns.devices + [ device ~ '/custom/timer'] %}
       {% endif %}
     {%- endfor %}
@@ -137,6 +137,9 @@ action:
                         qos: 0
                         retain: false
                         topic: "{{ repeat.item }}"
+                      condition:
+                        - condition: template
+                          value_template: "{{ repeat.item != '' }}"
               - repeat:
                   for_each: "{{ devices_topics }}"
                   sequence:
@@ -146,3 +149,6 @@ action:
                         retain: false
                         topic: "{{ repeat.item | replace('/timer', '/settings') }}"
                         payload: "{\"ATRANS\": true}"
+                      condition:
+                        - condition: template
+                          value_template: "{{ repeat.item != '' }}"
