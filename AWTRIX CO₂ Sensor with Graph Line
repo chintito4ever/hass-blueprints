@@ -104,7 +104,7 @@ variables:
   co2_max: !input co2_max
   message_duration: !input message_duration
   graph_color: "{{ graph_color | from_json }}"
-  app_name: "co2_display"
+  app_name: co2_display
 
   # Current CO₂ Value
   co2_value: "{{ states(co2_sensor) | float(0) }}"
@@ -150,7 +150,7 @@ variables:
     {% set display_width = 32 %}
     {{ ((display_width - text_length) / 2) | int }}
 
-trigger:
+triggers:
   - platform: state
     entity_id: !input toggle_helper
     to: "on"
@@ -162,26 +162,36 @@ trigger:
   - platform: state
     entity_id: !input co2_sensor
 
-action:
-  - service: mqtt.publish
-    data:
-      topic: "custom/{{ app_name }}"
-      payload: >-
-        {
-          "draw": [
-            {"dt": [{{ text_x }}, 0, "{{ co2_value | int }} {{ co2_unit }}", "#FFFFFF"]},
-            {"dl": [0, 7, {{ graph_length }}, 7, "{{ graph_color_value }}"]}
-          ],
-          "icon": "{{ icon }}",
-          "duration": {{ message_duration }},
-          "pushIcon": 2
-        }
-  - service: mqtt.publish
-    data:
-      qos: 0
-      retain: false
-      topic: "custom/switch"
-      payload: >-
-        {
-          "name": "{{ app_name }}"
-        }
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: 'On'
+        sequence:
+          - repeat:
+              for_each: '{{ devices }}'
+              sequence:
+                - data:
+                    qos: 0
+                    retain: false
+                    topic: '{{repeat.item}}/custom/{{app_name}}'
+                    payload: |-
+                      {
+                        "draw": [
+                          {"dt": [{{ text_x }}, 0, "{{ co2_value | int }} {{ co2_unit }}", "#FFFFFF"]},
+                          {"dl": [0, 7, {{ graph_length }}, 7, "{{ graph_color_value }}"]}
+                        ],
+                        "icon": "{{ icon }}",
+                        "duration": {{ message_duration }},
+                        "pushIcon": 2
+                      }
+                  action: mqtt.publish
+                - data:
+                    qos: 0
+                    retain: false
+                    topic: '{{repeat.item}}/switch'
+                    payload: |-
+                      {   
+                        "name": "{{app_name}}"
+                      }
+                  action: mqtt.publish
