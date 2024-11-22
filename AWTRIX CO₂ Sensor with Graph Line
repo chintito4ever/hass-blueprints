@@ -105,7 +105,6 @@ variables:
   message_duration: !input message_duration
   graph_color: "{{ graph_color | from_json }}"
   app_name: "co2_display"
-  my_toggle_helper: toggle_helper
 
   # Current CO₂ Value
   co2_value: "{{ states(co2_sensor) | float(0) }}"
@@ -166,7 +165,7 @@ trigger:
 action:
   - service: mqtt.publish
     data:
-      topic: "{{ custom/{{app_name}} }}"
+      topic: "custom/{{ app_name }}"
       payload: >-
         {
           "draw": [
@@ -181,8 +180,8 @@ action:
     data:
       qos: 0
       retain: false
-      topic: "{{custom/switch"
-      payload: |-
-        {   
-          "name": "{{app_name}}"
+      topic: "custom/switch"
+      payload: >-
+        {
+          "name": "{{ app_name }}"
         }
