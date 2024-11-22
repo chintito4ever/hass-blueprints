@@ -1,0 +1,188 @@
+blueprint:
+  name: AWTRIX CO₂ Sensor with Graph Line
+  description: >
+    Display the current CO₂ sensor value with an icon at the top and a horizontal graph line at the bottom, representing the CO₂ level relative to a defined range.
+
+    ## Features
+    - Displays a CO₂ icon.
+    - Shows the current CO₂ value on top.
+    - A horizontal graph line at the bottom changes dynamically with the CO₂ value.
+
+  domain: automation
+  input:
+    awtrix:
+      name: AWTRIX Device
+      description: Select your Awtrix device
+      selector:
+        device:
+          integration: mqtt
+          manufacturer: Blueforcer
+          model: AWTRIX 3
+    toggle_helper:
+      name: Toggle Helper
+      description: Select the Toggle Helper that will toggle the App on or off.
+      selector:
+        entity:
+          domain: input_boolean
+    co2_sensor:
+      name: CO₂ Sensor
+      description: Select the CO₂ sensor entity
+      selector:
+        entity:
+          domain: sensor
+          device_class: carbon_dioxide
+
+    icon:
+      name: Icon
+      description: >
+        Enter the icon ID or name to display alongside the CO₂ value.
+      default: "co2_icon"
+      selector:
+        text:
+
+    co2_min:
+      name: Minimum CO₂ Value
+      description: Minimum CO₂ value for scaling the graph (e.g., 400 ppm)
+      default: 400
+      selector:
+        number:
+          min: 0
+          max: 10000
+          unit_of_measurement: "ppm"
+          mode: box
+
+    co2_max:
+      name: Maximum CO₂ Value
+      description: Maximum CO₂ value for scaling the graph (e.g., 2000 ppm)
+      default: 2000
+      selector:
+        number:
+          min: 0
+          max: 10000
+          unit_of_measurement: "ppm"
+          mode: box
+
+    graph_color:
+      name: Graph Color Gradient
+      description: >
+        Define a JSON object mapping CO₂ levels to colors for the graph line.
+        Example:
+        ```
+        {
+          "400": "#00FF00",
+          "800": "#FFFF00",
+          "2000": "#FF0000"
+        }
+        ```
+      default: >
+        {
+          "400": "#00FF00",
+          "800": "#FFFF00",
+          "2000": "#FF0000"
+        }
+      selector:
+        text:
+          multiline: true
+
+    message_duration:
+      name: Message Duration
+      description: How long the message should stay on the display (in seconds)
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: "sec"
+
+mode: restart
+variables:
+  device_id: !input awtrix
+  app_topic: "co2_display"
+  co2_sensor: !input co2_sensor
+  icon: !input icon
+  co2_min: !input co2_min
+  co2_max: !input co2_max
+  message_duration: !input message_duration
+  graph_color: !input graph_color | from_json
+  app_name: "co2_display"
+  my_toggle_helper: toggle_helper
+
+  # Current CO₂ Value
+  co2_value: "{{ states(co2_sensor) | float(0) }}"
+  co2_unit: "{{ state_attr(co2_sensor, 'unit_of_measurement') or 'ppm' }}"
+
+  # Graph Line Length
+  graph_length: >-
+    {% set value = (co2_value - co2_min) / (co2_max - co2_min) * 24 %}
+    {% if value < 0 %}
+      {% set value = 0 %}
+    {% elif value > 24 %}
+      {% set value = 24 %}
+    {% endif %}
+    {{ value | int }}
+
+  # Interpolate Graph Color
+  graph_color_value: >-
+    {%- macro interpolate(dictionary, x) -%}
+    {%- set sorted_keys = dictionary | dictsort -%}
+    {%- set above = sorted_keys | selectattr('0', 'gt', x) | map(attribute='0') | list | first -%}
+    {%- set below = sorted_keys | selectattr('0', 'lt', x) | map(attribute='0') | list | last -%}
+    {%- if above and below -%}
+      {%- set lower_color = dictionary[below][1:] | int(16) %}
+      {%- set upper_color = dictionary[above][1:] | int(16) %}
+      {%- set factor = (x - below) / (above - below) %}
+      {%- set interpolated = 
+        '#' ~ '%02X' % ((1 - factor) * lower_color + factor * upper_color) %}
+      {{ interpolated }}
+    {%- elif above -%}
+      {{ dictionary[above] }}
+    {%- elif below -%}
+      {{ dictionary[below] }}
+    {%- else -%}
+      "#FFFFFF"
+    {%- endif -%}
+    {%- endmacro -%}
+    {{ interpolate(graph_color, co2_value) }}
+
+  # Center Text
+  text_x: >-
+    {% set text = co2_value | int | string + ' ' + co2_unit %}
+    {% set text_length = text | length * 4 %}
+    {% set display_width = 32 %}
+    {{ ((display_width - text_length) / 2) | int }}
+
+trigger:
+  - platform: state
+    entity_id: !input toggle_helper
+    to: "on"
+    id: "On"
+  - platform: state
+    entity_id: !input toggle_helper
+    to: "off"
+    id: "Off"
+  - platform: state
+    entity_id: !input co2_sensor
+
+action:
+  - service: mqtt.publish
+    data:
+      topic: "{{ custom/{{app_name}} }}"
+      payload: >-
+        {
+          "draw": [
+            {"dt": [{{ text_x }}, 0, "{{ co2_value | int }} {{ co2_unit }}", "#FFFFFF"]},
+            {"dl": [0, 7, {{ graph_length }}, 7, "{{ graph_color_value }}"]}
+          ],
+          "icon": "{{ icon }}",
+          "duration": {{ message_duration }},
+          "pushIcon": 2
+        }
+  - service: mqtt.publish
+    data:
+      qos: 0
+      retain: false
+      topic: "{{custom/switch"
+      payload: |-
+        {   
+          "name": "{{app_name}}"
+        }
