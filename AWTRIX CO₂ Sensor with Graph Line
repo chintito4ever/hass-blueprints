@@ -103,7 +103,7 @@ variables:
   co2_min: !input co2_min
   co2_max: !input co2_max
   message_duration: !input message_duration
-  graph_color: !input graph_color | from_json
+  graph_color: "{{ graph_color | from_json }}"
   app_name: "co2_display"
   my_toggle_helper: toggle_helper
 
